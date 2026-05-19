@@ -8,13 +8,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+_log_handlers = [logging.StreamHandler()]
+try:
+    import os as _os
+    _os.makedirs("logs", exist_ok=True)
+    _log_handlers.append(logging.FileHandler("logs/run.log"))
+except Exception:
+    pass
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("logs/run.log"),
-    ],
+    handlers=_log_handlers,
 )
 logger = logging.getLogger(__name__)
 

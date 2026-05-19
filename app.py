@@ -9,13 +9,18 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+_log_handlers = [logging.StreamHandler()]
+try:
+    import os
+    os.makedirs("logs", exist_ok=True)
+    _log_handlers.append(logging.FileHandler("logs/app.log"))
+except Exception:
+    pass  # Streamlit Cloud — no local filesystem, skip file logging
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("logs/app.log"),
-    ],
+    handlers=_log_handlers,
 )
 
 st.set_page_config(
