@@ -135,23 +135,33 @@ class SheetsClient:
 
     def _find_row(self, ws: gspread.Worksheet, email: str) -> Optional[int]:
         """Return 1-based row index for the given email, or None."""
-        col_values = ws.col_values(2)  # Email is column B
+        col_values = _sheets_retry(lambda: ws.col_values(2))
         email_lower = email.lower()
         for i, val in enumerate(col_values):
             if val.lower() == email_lower:
                 return i + 1
         return None
 
+    def _batch_update(self, ws: gspread.Worksheet, updates: list[tuple]):
+        """Apply multiple cell updates in one API call. updates = [(row, col, value), ...]"""
+        body = {
+            "valueInputOption": "RAW",
+            "data": [
+                {"range": gspread.utils.rowcol_to_a1(r, c), "values": [[v]]}
+                for r, c, v in updates
+            ],
+        }
+        _sheets_retry(lambda: ws.spreadsheet.values_batch_update(body=body))
+
     def update_status(self, email: str, status: str, user_name: str, notes: str = "") -> bool:
         ws = self._get_or_create_tab(user_name)
         row = self._find_row(ws, email)
         if row is None:
             return False
-        status_col = COLUMNS.index("Status") + 1
-        ws.update_cell(row, status_col, status)
+        updates = [(row, COLUMNS.index("Status") + 1, status)]
         if notes:
-            notes_col = COLUMNS.index("Notes") + 1
-            ws.update_cell(row, notes_col, notes)
+            updates.append((row, COLUMNS.index("Notes") + 1, notes))
+        self._batch_update(ws, updates)
         return True
 
     # ── Row highlighting ───────────────────────────────────────────────────────
@@ -170,27 +180,27 @@ class SheetsClient:
         row = self._find_row(ws, email)
         if row is None:
             return False
-        ws.update_cell(row, COLUMNS.index("Status") + 1, STATUS_EMAILED)
-        ws.update_cell(row, COLUMNS.index("Date Emailed") + 1, datetime.now().strftime("%Y-%m-%d %H:%M"))
+        updates = [
+            (row, COLUMNS.index("Status") + 1, STATUS_EMAILED),
+            (row, COLUMNS.index("Date Emailed") + 1, datetime.now().strftime("%Y-%m-%d %H:%M")),
+        ]
         if message_id:
-            ws.update_cell(row, COLUMNS.index("Message ID") + 1, message_id)
-        # 🟢 Green — email sent, review that name matches
-        self._highlight_row(ws, row, (0.85, 0.93, 0.83))
+            updates.append((row, COLUMNS.index("Message ID") + 1, message_id))
+        self._batch_update(ws, updates)
+        _sheets_retry(lambda: self._highlight_row(ws, row, (0.85, 0.93, 0.83)))
         return True
 
     def flag_mismatch(self, email: str, user_name: str, reason: str) -> bool:
-        """
-        🟠 Orange — name/email mismatch flagged, email was NOT sent.
-        Writes the reason into Notes so you can see exactly what's wrong.
-        """
+        """🟠 Orange — name/email mismatch flagged, email was NOT sent."""
         ws = self._get_or_create_tab(user_name)
         row = self._find_row(ws, email)
         if row is None:
             return False
-        ws.update_cell(row, COLUMNS.index("Notes") + 1, f"⚠️ MISMATCH: {reason}")
-        ws.update_cell(row, COLUMNS.index("Status") + 1, "mismatch_flagged")
-        # 🟠 Orange — needs your review
-        self._highlight_row(ws, row, (1.0, 0.85, 0.6))
+        self._batch_update(ws, [
+            (row, COLUMNS.index("Notes") + 1, f"MISMATCH: {reason}"),
+            (row, COLUMNS.index("Status") + 1, "mismatch_flagged"),
+        ])
+        _sheets_retry(lambda: self._highlight_row(ws, row, (1.0, 0.85, 0.6)))
         return True
 
     def mark_replied(self, email: str, user_name: str) -> bool:
@@ -198,8 +208,10 @@ class SheetsClient:
         row = self._find_row(ws, email)
         if row is None:
             return False
-        ws.update_cell(row, COLUMNS.index("Status") + 1, STATUS_REPLIED)
-        ws.update_cell(row, COLUMNS.index("Reply Date") + 1, datetime.now().strftime("%Y-%m-%d %H:%M"))
+        self._batch_update(ws, [
+            (row, COLUMNS.index("Status") + 1, STATUS_REPLIED),
+            (row, COLUMNS.index("Reply Date") + 1, datetime.now().strftime("%Y-%m-%d %H:%M")),
+        ])
         return True
 
     def get_emailed_message_ids(self, user_name: str) -> dict[str, str]:
@@ -239,7 +251,7 @@ class SheetsClient:
         row = self._find_row(ws, email)
         if row is None:
             return False
-        ws.update_cell(row, COLUMNS.index("Follow Up Sent") + 1, datetime.now().strftime("%Y-%m-%d %H:%M"))
+        self._batch_update(ws, [(row, COLUMNS.index("Follow Up Sent") + 1, datetime.now().strftime("%Y-%m-%d %H:%M"))])
         return True
 
     def get_daily_email_count(self, user_name: str) -> int:
