@@ -1,0 +1,27 @@
+name: "Bob Smith"
+email: "bob@gmail.com"
+resume_summary: "3 years in data science and ML engineering. Proficient in Python, TensorFlow, and building data pipelines at scale."
+resume_pdf: "resumes/bob_resume.pdf"
+target_roles:
+  - "Data Scientist"
+  - "ML Engineer"
+  - "Data Engineer"
+
+target_countries:
+  - name: "Canada"
+    needs_sponsorship: true
+    custom_prompt: "Mention that I require work permit sponsorship and am actively seeking opportunities in Canada."
+  - name: "Australia"
+    needs_sponsorship: true
+    custom_prompt: "Mention that I would need employer-sponsored visa support to work in Australia."
+  - name: "India"
+    needs_sponsorship: false
+    custom_prompt: ""
+
+gmail_credentials_file: "credentials/user2_credentials.json"
+gmail_token_file: "credentials/user2_token.json"
+telegram_chat_id: "YOUR_TELEGRAM_CHAT_ID"
+
+daily_email_limit: 15
+follow_up_days: 7
+enabled: true

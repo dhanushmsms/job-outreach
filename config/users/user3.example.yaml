@@ -1,0 +1,27 @@
+name: "Carol Davis"
+email: "carol@gmail.com"
+resume_summary: "Full-stack developer with 4 years experience in React, Node.js, and cloud infrastructure (AWS/GCP). Passionate about product-led companies."
+resume_pdf: "resumes/carol_resume.pdf"
+target_roles:
+  - "Full Stack Developer"
+  - "Frontend Engineer"
+  - "React Developer"
+
+target_countries:
+  - name: "Netherlands"
+    needs_sponsorship: true
+    custom_prompt: "Mention that I require a Dutch work visa (HSMP or employer sponsorship) and am open to relocation."
+  - name: "Singapore"
+    needs_sponsorship: true
+    custom_prompt: "Mention that I would need an Employment Pass (EP) sponsorship to work in Singapore."
+  - name: "India"
+    needs_sponsorship: false
+    custom_prompt: ""
+
+gmail_credentials_file: "credentials/user3_credentials.json"
+gmail_token_file: "credentials/user3_token.json"
+telegram_chat_id: "YOUR_TELEGRAM_CHAT_ID"
+
+daily_email_limit: 20
+follow_up_days: 7
+enabled: true

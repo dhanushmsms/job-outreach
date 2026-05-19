@@ -1,0 +1,28 @@
+name: "Alice Johnson"
+email: "alice@gmail.com"
+resume_summary: "5 years of backend engineering experience in Python and distributed systems. Led teams of 8, shipped 3 fintech products to production."
+resume_pdf: "resumes/alice_resume.pdf"
+target_roles:
+  - "Software Engineer"
+  - "Backend Engineer"
+  - "Python Developer"
+
+# Countries with individual sponsorship + custom prompt settings
+target_countries:
+  - name: "United Kingdom"
+    needs_sponsorship: true
+    custom_prompt: "Mention that I am willing to relocate and require a Skilled Worker visa sponsorship."
+  - name: "Germany"
+    needs_sponsorship: true
+    custom_prompt: "Mention that I require work visa sponsorship and am open to relocation."
+  - name: "India"
+    needs_sponsorship: false
+    custom_prompt: ""
+
+gmail_credentials_file: "credentials/user1_credentials.json"
+gmail_token_file: "credentials/user1_token.json"
+telegram_chat_id: "YOUR_TELEGRAM_CHAT_ID"
+
+daily_email_limit: 20
+follow_up_days: 7
+enabled: true

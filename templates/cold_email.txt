@@ -1,0 +1,16 @@
+Subject: Exploring {target_role} Opportunities at {recipient_company}
+
+Hi {recipient_name},
+
+I came across your profile and wanted to reach out about potential {target_role} opportunities at {recipient_company}.
+
+{resume_summary}
+
+{sponsorship_line}I'm currently exploring opportunities in {country} and would love to learn more about what your team is working on. Would you be open to a brief 15-minute call to explore if there might be a fit?
+
+I've attached my resume for your reference.
+
+Thank you for your time.
+
+Best regards,
+{sender_name}

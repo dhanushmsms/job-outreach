@@ -1,0 +1,26 @@
+# ── Credentials & secrets — NEVER commit these ────────────────────────────────
+credentials/
+*.json
+!credentials/.gitkeep
+config/settings.yaml
+config/users/*.yaml
+!config/users/*.example.yaml
+.env
+.streamlit/secrets.toml
+
+# ── Resumes — personal files, don't push ──────────────────────────────────────
+resumes/
+!resumes/.gitkeep
+
+# ── Logs & runtime ────────────────────────────────────────────────────────────
+logs/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
