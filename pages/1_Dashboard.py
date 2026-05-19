@@ -93,7 +93,10 @@ def color_status(val):
     }
     return colors.get(val, "")
 
-styled = df.style.applymap(color_status, subset=["Status"] if "Status" in df.columns else [])
+try:
+    styled = df.style.map(color_status, subset=["Status"] if "Status" in df.columns else [])
+except AttributeError:
+    styled = df.style.applymap(color_status, subset=["Status"] if "Status" in df.columns else [])
 st.dataframe(styled, use_container_width=True, height=500)
 
 # Export
