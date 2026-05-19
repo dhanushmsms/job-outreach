@@ -1,11 +1,29 @@
 """Google Sheets CRM — one shared sheet, one tab per user."""
 
 import logging
+import time
 from datetime import datetime
 from typing import Optional
 
 import gspread
 from google.oauth2.service_account import Credentials
+
+
+def _sheets_retry(fn, retries=4, base_delay=15):
+    """Retry a gspread call on 429 rate-limit errors with exponential backoff."""
+    for attempt in range(retries):
+        try:
+            return fn()
+        except gspread.exceptions.APIError as e:
+            if "429" in str(e) and attempt < retries - 1:
+                wait = base_delay * (2 ** attempt)
+                logging.getLogger(__name__).warning(
+                    "Sheets rate limit hit — retrying in %ss (attempt %d/%d)",
+                    wait, attempt + 1, retries,
+                )
+                time.sleep(wait)
+            else:
+                raise
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +64,7 @@ class SheetsClient:
             logger.info(f"Created new tab: {tab_name}")
 
         # Always verify row 1 is the correct header — insert it if missing or wrong
-        first_row = ws.row_values(1)
+        first_row = _sheets_retry(lambda: ws.row_values(1))
         if first_row != COLUMNS:
             logger.info(f"Inserting header row into tab: {tab_name}")
             ws.insert_row(COLUMNS, index=1)
@@ -56,7 +74,7 @@ class SheetsClient:
 
     def _all_rows(self, ws: gspread.Worksheet) -> list[dict]:
         """Return all data rows as dicts, mapped to COLUMNS regardless of sheet state."""
-        all_values = ws.get_all_values()
+        all_values = _sheets_retry(ws.get_all_values)
         if not all_values:
             return []
         # Skip row 1 if it's the header

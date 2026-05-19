@@ -60,8 +60,8 @@ def validate_contact(contact: dict) -> tuple[bool, str]:
     local_tokens = set(re.split(r'[.\-_+]', local))
 
     # Rule 2 — generic inboxes are fine without a personal name
-    if local_tokens & _GENERIC_EMAIL_PREFIXES:
-        # Generic inbox — acceptable even with no name; will greet as "there"
+    # Use substring match so e.g. "unitybusinessservicesrecruitmentresults" still matches "recruitment"
+    if any(prefix in local for prefix in _GENERIC_EMAIL_PREFIXES):
         return True, ""
 
     # Rule 3 — personal email but no name at all
@@ -193,7 +193,8 @@ def generate_personalized_email(
 
     sponsorship_note = get_sponsorship_line(country_config)
     roles_str = ", ".join(user_config.get("target_roles", ["the role"]))
-    first_name = (contact.get("name") or "").split()[0] or "there"
+    _name_parts = (contact.get("name") or "").split()
+    first_name = _name_parts[0] if _name_parts else "there"
 
     # Company handling — never expose a placeholder in the email
     company = (contact.get("company") or "").strip()
