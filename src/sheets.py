@@ -43,18 +43,31 @@ class SheetsClient:
             ws = self._spreadsheet.worksheet(tab_name)
         except gspread.WorksheetNotFound:
             ws = self._spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=len(COLUMNS))
-            ws.append_row(COLUMNS)
-            ws.format("A1:L1", {"textFormat": {"bold": True}})
             logger.info(f"Created new tab: {tab_name}")
+
+        # Always verify row 1 is the correct header — insert it if missing or wrong
+        first_row = ws.row_values(1)
+        if first_row != COLUMNS:
+            logger.info(f"Inserting header row into tab: {tab_name}")
+            ws.insert_row(COLUMNS, index=1)
+            ws.format(f"A1:{chr(ord('A') + len(COLUMNS) - 1)}1",
+                      {"textFormat": {"bold": True}})
         return ws
 
     def _all_rows(self, ws: gspread.Worksheet) -> list[dict]:
-        # expected_headers avoids crash when sheet has blank/duplicate header columns
-        try:
-            return ws.get_all_records(expected_headers=COLUMNS)
-        except TypeError:
-            # Older gspread versions don't support expected_headers
-            return ws.get_all_records()
+        """Return all data rows as dicts, mapped to COLUMNS regardless of sheet state."""
+        all_values = ws.get_all_values()
+        if not all_values:
+            return []
+        # Skip row 1 if it's the header
+        header = all_values[0]
+        data_rows = all_values[1:] if header == COLUMNS else all_values
+        result = []
+        for row in data_rows:
+            # Pad or trim row to match COLUMNS length
+            padded = (row + [""] * len(COLUMNS))[:len(COLUMNS)]
+            result.append(dict(zip(COLUMNS, padded)))
+        return result
 
     def add_contacts(self, contacts: list[dict], user_name: str) -> int:
         """Add new contacts, skip duplicates by email or company+name. Returns count added."""
