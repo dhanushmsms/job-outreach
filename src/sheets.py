@@ -49,8 +49,12 @@ class SheetsClient:
         return ws
 
     def _all_rows(self, ws: gspread.Worksheet) -> list[dict]:
-        records = ws.get_all_records()
-        return records
+        # expected_headers avoids crash when sheet has blank/duplicate header columns
+        try:
+            return ws.get_all_records(expected_headers=COLUMNS)
+        except TypeError:
+            # Older gspread versions don't support expected_headers
+            return ws.get_all_records()
 
     def add_contacts(self, contacts: list[dict], user_name: str) -> int:
         """Add new contacts, skip duplicates by email or company+name. Returns count added."""
