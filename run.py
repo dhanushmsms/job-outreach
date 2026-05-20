@@ -198,7 +198,7 @@ def run_monitor(users, settings, since_hours=24):
         replies = check_for_replies(user, sent_ids, since_hours=since_hours)
         for reply in replies:
             sheet.mark_replied(reply.original_to, user["name"])
-            notify_reply_received(reply, user, settings)
+            notify_reply_received(reply, user, settings, all_users=users)
             draft_reply(reply, user, settings)
             logger.info(f"[{user['name']}] Reply from {reply.from_email} handled")
 

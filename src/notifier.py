@@ -94,36 +94,40 @@ def notify_cookie_expired(user_config: dict, settings: dict) -> None:
     logger.warning("LinkedIn cookie expiry notification sent to %s", user_config.get("email"))
 
 
-def notify_reply_received(reply, user_config: dict, settings: dict) -> None:
-    """Notify user of a new reply via Telegram + WhatsApp + Gmail self-email."""
+def notify_reply_received(reply, user_config: dict, settings: dict, all_users: list = None) -> None:
+    """
+    Notify about a new reply.
+    - The person whose email got the reply gets full notification + draft email
+    - ALL other users get a Telegram ping so everyone stays in the loop
+    """
+    recipient_name = user_config.get("name", "").split()[0]
 
     plain_msg = (
-        f"New reply!\n\n"
+        f"New reply for {recipient_name}!\n\n"
         f"From: {reply.from_name} <{reply.from_email}>\n"
         f"Subject: {reply.subject}\n\n"
         f"{reply.body_preview[:200]}\n\n"
-        f"Check your Gmail — a draft reply is ready to review."
+        f"Check {recipient_name}'s Gmail — a draft reply is ready to review."
     )
 
     tg_msg = (
-        f"*New reply!* \U0001f4e9\n\n"
+        f"📩 *New reply for {recipient_name}!*\n\n"
         f"*From:* {reply.from_name} <{reply.from_email}>\n"
         f"*Subject:* {reply.subject}\n\n"
-        f"_{reply.body_preview[:200]}_\n\n"
-        f"Check your Gmail — a draft reply is ready to review."
+        f"_{reply.body_preview[:200]}_"
     )
+
+    # ── Notify the person whose email got the reply ────────────────────────────
     notify_telegram(
         message=tg_msg,
         bot_token=settings.get("telegram_bot_token", ""),
         chat_id=user_config.get("telegram_chat_id", ""),
     )
-
     notify_whatsapp(
         message=plain_msg,
         phone=user_config.get("whatsapp_phone", ""),
         api_key=user_config.get("whatsapp_api_key", ""),
     )
-
     email_body = (
         f"You received a reply from {reply.from_name} ({reply.from_email})\n\n"
         f"Subject: {reply.subject}\n\n"
@@ -137,3 +141,18 @@ def notify_reply_received(reply, user_config: dict, settings: dict) -> None:
         body=email_body,
         user_config=user_config,
     )
+
+    # ── Also notify all OTHER users (admin visibility) ─────────────────────────
+    for other in (all_users or []):
+        if other.get("email") == user_config.get("email"):
+            continue  # already notified above
+        notify_telegram(
+            message=tg_msg,
+            bot_token=settings.get("telegram_bot_token", ""),
+            chat_id=other.get("telegram_chat_id", ""),
+        )
+        notify_whatsapp(
+            message=plain_msg,
+            phone=other.get("whatsapp_phone", ""),
+            api_key=other.get("whatsapp_api_key", ""),
+        )
