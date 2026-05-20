@@ -69,6 +69,27 @@ def _check_cookie_health(settings: dict, users: list, countries_sample: list = N
     return True
 
 
+def _cross_share_contacts(sheet: SheetsClient, contact_dicts: list[dict], all_users: list, scraping_user: dict):
+    """
+    After scraping for one user, share contacts with every OTHER user whose
+    target countries include the same country. Each person emails from their
+    own account — so one contact can receive emails from multiple people.
+    Dedup in add_contacts prevents sending twice from the same person.
+    """
+    for other_user in all_users:
+        if other_user["name"] == scraping_user["name"]:
+            continue
+        other_countries = [c["name"].lower() for c in other_user.get("target_countries", [])]
+        # Only share contacts whose country this other user also targets
+        matching = [c for c in contact_dicts if c.get("country", "").lower() in other_countries]
+        if matching:
+            added = sheet.add_contacts(matching, other_user["name"])
+            logger.info(
+                f"[cross-share] {len(matching)} contacts from {scraping_user['name']} → "
+                f"{other_user['name']} ({added} new)"
+            )
+
+
 def run_scrape(users, settings, countries_override=None, max_contacts=50):
     sheet = SheetsClient(settings["google_sheet_id"], settings["google_service_account_file"])
 
@@ -96,11 +117,15 @@ def run_scrape(users, settings, countries_override=None, max_contacts=50):
             )
             contact_dicts = [
                 {"name": c.name, "email": c.email or "", "company": c.company,
-                 "title": c.title, "country": c.country, "linkedin_url": c.linkedin_url or "", "source": c.source}
+                 "title": c.title, "country": c.country, "linkedin_url": c.linkedin_url or "",
+                 "source": c.source, "role_type": c.role_type}
                 for c in contacts
             ]
             added = sheet.add_contacts(contact_dicts, user["name"])
             logger.info(f"[{user['name']}] {country_name}: {len(contacts)} found, {added} new")
+
+            # ── Share contacts with other users who also target this country ──
+            _cross_share_contacts(sheet, contact_dicts, users, user)
 
 
 def run_email(users, settings, dry_run=False):
