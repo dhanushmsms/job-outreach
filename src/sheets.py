@@ -33,10 +33,10 @@ SCOPES = [
 ]
 
 COLUMNS = [
-    "Name", "Email", "Company", "Title", "Country",
+    "Name", "Email", "Job Title",
+    "Company", "Title", "Country",
     "LinkedIn URL", "Source", "Role Type", "Status",
     "Date Emailed", "Reply Date", "Notes", "Message ID", "Follow Up Sent",
-    "Job Title",
 ]
 
 STATUS_FOLLOW_UP = "follow_up_sent"
@@ -117,6 +117,7 @@ class SheetsClient:
             rows_to_append.append([
                 c.get("name", ""),
                 email,
+                c.get("job_title", ""),   # Job Title is now column 3
                 c.get("company", ""),
                 c.get("title", ""),
                 c.get("country", ""),
@@ -125,7 +126,6 @@ class SheetsClient:
                 c.get("role_type", ""),
                 STATUS_SCRAPED,
                 "", "", "", "", "",  # Date Emailed, Reply Date, Notes, Message ID, Follow Up Sent
-                c.get("job_title", ""),
             ])
             added += 1
         if rows_to_append:

@@ -69,35 +69,29 @@ def _check_cookie_health(settings: dict, users: list, countries_sample: list = N
     return True
 
 
-def _cross_share_contacts(sheet: SheetsClient, contact_dicts: list[dict], all_users: list, scraping_user: dict):
-    """
-    After scraping for one user, share contacts with every OTHER user whose
-    target countries include the same country. Each person emails from their
-    own account — so one contact can receive emails from multiple people.
-    Dedup in add_contacts prevents sending twice from the same person.
-    """
-    for other_user in all_users:
-        if other_user["name"] == scraping_user["name"]:
-            continue
-        other_countries = [c["name"].lower() for c in other_user.get("target_countries", [])]
-        # Only share contacts whose country this other user also targets
-        matching = [c for c in contact_dicts if c.get("country", "").lower() in other_countries]
-        if matching:
-            added = sheet.add_contacts(matching, other_user["name"])
-            logger.info(
-                f"[cross-share] {len(matching)} contacts from {scraping_user['name']} → "
-                f"{other_user['name']} ({added} new)"
-            )
 
 
 def run_scrape(users, settings, countries_override=None, max_contacts=50):
+    """
+    Scrape each country ONCE using the assigned Apify key,
+    then add the contacts to every user who targets that country.
+    No duplicate scraping — Apify credits used efficiently.
+    """
     import datetime as _dt
     sheet = SheetsClient(settings["google_sheet_id"], settings["google_service_account_file"])
 
-    # ── Cookie health check — runs once at the top of every scrape ────────────
-    all_countries = countries_override or list({
-        c["name"] for u in users for c in u.get("target_countries", [])
-    })
+    # Build {country: [(user, country_cfg), ...]} for all enabled users
+    country_map: dict[str, list] = {}
+    for user in users:
+        for ccfg in user.get("target_countries", []):
+            cname = ccfg["name"]
+            if countries_override and cname not in countries_override:
+                continue
+            country_map.setdefault(cname, []).append((user, ccfg))
+
+    all_countries = list(country_map.keys())
+
+    # ── Cookie health check ────────────────────────────────────────────────────
     _check_cookie_health(settings, users, countries_sample=all_countries[:2])
 
     # ── Telegram: notify run started ──────────────────────────────────────────
@@ -107,35 +101,41 @@ def run_scrape(users, settings, countries_override=None, max_contacts=50):
     total_scraped = 0
     total_new = 0
 
-    for user in users:
-        countries = countries_override or [c["name"] for c in user.get("target_countries", [])]
-        logger.info(f"[{user['name']}] Scraping countries: {countries}")
-        for country_name in countries:
-            country_cfg = next(
-                (c for c in user.get("target_countries", []) if c["name"].lower() == country_name.lower()),
-                {}
-            )
-            contacts = scrape_all(
-                country=country_name,
-                target_roles=user.get("target_roles", []),
-                apify_keys=settings.get("apify_keys", []),
-                needs_sponsorship=country_cfg.get("needs_sponsorship", False),
-                max_results=max_contacts,
-                linkedin_cookie=settings.get("linkedin_cookie"),
-            )
-            contact_dicts = [
-                {"name": c.name, "email": c.email or "", "company": c.company,
-                 "title": c.title, "country": c.country, "linkedin_url": c.linkedin_url or "",
-                 "source": c.source, "role_type": c.role_type, "job_title": c.job_title}
-                for c in contacts
-            ]
-            added = sheet.add_contacts(contact_dicts, user["name"])
-            total_scraped += len(contacts)
-            total_new += added
-            logger.info(f"[{user['name']}] {country_name}: {len(contacts)} found, {added} new")
+    for country_name, user_cfg_pairs in country_map.items():
+        # Collect combined target roles from all users targeting this country
+        all_roles, seen = [], set()
+        for user, _ in user_cfg_pairs:
+            for r in user.get("target_roles", []):
+                if r not in seen:
+                    all_roles.append(r)
+                    seen.add(r)
 
-            # ── Share contacts with other users who also target this country ──
-            _cross_share_contacts(sheet, contact_dicts, users, user)
+        # needs_sponsorship — True if ANY user targeting this country needs it
+        needs_sponsorship = any(ccfg.get("needs_sponsorship", False) for _, ccfg in user_cfg_pairs)
+        user_names = ", ".join(u["name"].split()[0] for u, _ in user_cfg_pairs)
+        logger.info(f"[{country_name}] Scraping once for: {user_names}")
+
+        contacts = scrape_all(
+            country=country_name,
+            target_roles=all_roles[:6],
+            apify_keys=settings.get("apify_keys", []),
+            needs_sponsorship=needs_sponsorship,
+            max_results=max_contacts,
+            linkedin_cookie=settings.get("linkedin_cookie"),
+        )
+        contact_dicts = [
+            {"name": c.name, "email": c.email or "", "company": c.company,
+             "title": c.title, "country": c.country, "linkedin_url": c.linkedin_url or "",
+             "source": c.source, "role_type": c.role_type, "job_title": c.job_title}
+            for c in contacts
+        ]
+        total_scraped += len(contacts)
+
+        # Add contacts to EVERY user who targets this country
+        for user, _ in user_cfg_pairs:
+            added = sheet.add_contacts(contact_dicts, user["name"])
+            total_new += added
+            logger.info(f"[{country_name}] → {user['name'].split()[0]}: {added} new")
 
     # ── Telegram: notify scrape completed ────────────────────────────────────
     duration_mins = int((_dt.datetime.now() - start_time).total_seconds() / 60)
