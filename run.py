@@ -156,8 +156,17 @@ def run_email(users, settings, dry_run=False):
             logger.info(f"[{user['name']}] Daily limit reached, skipping")
             continue
 
-        contacts = sheet.get_contacts_by_status("scraped", user["name"])[:remaining]
-        logger.info(f"[{user['name']}] Sending to {len(contacts)} contacts")
+        all_scraped = sheet.get_contacts_by_status("scraped", user["name"])
+        # Pre-filter: only contacts with a valid email — avoids pointless API calls per contact
+        contacts_with_email = [c for c in all_scraped if c.get("Email", "").strip()]
+        contacts_no_email   = [c for c in all_scraped if not c.get("Email", "").strip()]
+        contacts = contacts_with_email[:remaining]
+        logger.info(
+            f"[{user['name']}] {len(all_scraped)} scraped | "
+            f"{len(contacts_with_email)} have email | "
+            f"{len(contacts_no_email)} no email (skipped) | "
+            f"Sending {len(contacts)}"
+        )
 
         for contact in contacts:
             country_name = contact.get("Country", "")
