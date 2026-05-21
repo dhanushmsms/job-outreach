@@ -25,6 +25,7 @@ class Contact:
     linkedin_url: Optional[str] = None
     source: str = "unknown"
     role_type: str = ""  # "contract", "sponsorship", "permanent", ""
+    job_title: str = ""  # the role being advertised / searched for
 
 
 # ── Country config ─────────────────────────────────────────────────────────────
@@ -58,15 +59,18 @@ COUNTRY_LINKEDIN_GEO = {
 }
 
 # Preferred sub-locations searched first; remainder of country fills up to max_results
-# Format: {country: [(location_label, geo_id_or_None), ...], then country-wide fallback}
+# Format: {country: [(location_label, geo_id_or_None), ...]}
+# India → Bangalore ONLY (no country-wide fallback — too noisy)
+# UK → Belfast first, then whole UK
+# Other countries → use single location (city or country)
 COUNTRY_PREFERRED_LOCATIONS = {
     "India": [
         ("Bangalore, Karnataka, India", "105556813"),
-        ("India", "102713980"),
+        # NO India-wide fallback — Bangalore only
     ],
     "United Kingdom": [
         ("Belfast, Northern Ireland, United Kingdom", "104869965"),
-        ("United Kingdom", "101165590"),
+        ("United Kingdom", "101165590"),   # UK-wide fallback
     ],
     "Europe": [
         ("Ireland", "104738515"),
@@ -76,6 +80,19 @@ COUNTRY_PREFERRED_LOCATIONS = {
         ("Europe", "100506914"),
     ],
 }
+
+# Job titles that are clearly irrelevant — contacts with these roles get filtered out
+IRRELEVANT_JOB_KEYWORDS = [
+    "store assistant", "shop assistant", "retail assistant", "sales assistant",
+    "warehouse", "delivery driver", "driver", "cleaner", "cleaning",
+    "chef", "cook", "kitchen", "barista", "bartender", "waiter", "waitress",
+    "cashier", "checkout", "security guard", "security officer",
+    "care assistant", "carer", "care worker", "support worker",
+    "teaching assistant", "nursery", "childcare",
+    "plumber", "electrician", "carpenter", "builder", "labourer",
+    "housekeeper", "hotel", "hospitality staff",
+    "packer", "picker", "forklift",
+]
 
 CONTRACT_KEYWORDS = ["contract", "contractor", "freelance", "interim", "fixed-term", "outside ir35"]
 SPONSORSHIP_KEYWORDS = [
@@ -134,18 +151,56 @@ def _detect_role_type(text: str) -> str:
     return ""
 
 
-def _extract_email(text: str) -> Optional[str]:
-    """Pull first valid email from any text blob."""
+def _extract_all_emails(text: str) -> list[str]:
+    """Extract all valid emails from text, de-duped and cleaned."""
     if not text:
+        return []
+    blocked = ["noreply", "no-reply", "example", ".png", ".jpg", "linkedin", "apify",
+               "indeed", "sentry", "wix", "cloudflare", "mailchimp", "bounce"]
+    found = []
+    seen = set()
+    for m in re.finditer(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', text):
+        email = m.group(0).strip(".,;:\"'")
+        el = email.lower()
+        if el in seen:
+            continue
+        if any(x in el for x in blocked):
+            continue
+        if "@" not in email or "." not in email.split("@")[-1]:
+            continue
+        seen.add(el)
+        found.append(email)
+    return found
+
+
+def _best_email(emails: list[str]) -> Optional[str]:
+    """Pick the most useful email: personal/specific beats generic inboxes."""
+    if not emails:
         return None
-    match = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', text)
-    if match:
-        email = match.group(0).strip(".,;:")
-        # Skip no-reply, image files, generic/internal addresses
-        blocked = ["noreply", "no-reply", "example", ".png", ".jpg", "linkedin", "apify", "indeed", "sentry", "wix"]
-        if not any(x in email.lower() for x in blocked) and "@" in email and "." in email.split("@")[-1]:
-            return email
-    return None
+    generic_prefixes = ["info", "hello", "contact", "enquiries", "enquiry",
+                        "admin", "support", "hr", "recruitment", "careers",
+                        "jobs", "hiring", "talent", "apply", "team", "office"]
+    personal, generic = [], []
+    for e in emails:
+        local = e.split("@")[0].lower()
+        if any(local == p or local.startswith(p + ".") for p in generic_prefixes):
+            generic.append(e)
+        else:
+            personal.append(e)
+    return (personal + generic)[0]
+
+
+def _extract_email(text: str) -> Optional[str]:
+    """Pull the best email from any text blob (personal > generic, no blocked)."""
+    return _best_email(_extract_all_emails(text))
+
+
+def _is_relevant_role(title: str) -> bool:
+    """Return False if the job title is clearly unrelated to data/ops/analytics."""
+    if not title:
+        return True  # no title → don't filter
+    tl = title.lower()
+    return not any(kw in tl for kw in IRRELEVANT_JOB_KEYWORDS)
 
 
 # ── LinkedIn Jobs (Apify) ──────────────────────────────────────────────────────
@@ -175,7 +230,7 @@ def scrape_linkedin_jobs(
     for role in roles[:3]:
         if len(contacts) >= max_results:
             break
-        query = role + (" visa sponsorship" if needs_sponsorship else " contract")
+        query = role + (" visa sponsorship" if needs_sponsorship else " hiring manager")
 
         for loc_label, _geo_id in location_passes:
             if len(contacts) >= max_results:
@@ -194,18 +249,21 @@ def scrape_linkedin_jobs(
                 if len(contacts) >= max_results:
                     break
                 desc = str(item.get("descriptionText") or item.get("descriptionHtml") or "")
-                poster_title = str(item.get("jobPosterTitle") or item.get("title") or "Hiring Manager")
-                email = (
-                    _extract_email(poster_title) or
-                    _extract_email(desc) or
-                    _extract_email(str(item.get("companyWebsite") or ""))
-                )
+                job_position = str(item.get("title") or role)
+                poster_title = str(item.get("jobPosterTitle") or "Hiring Manager")
+                # Filter out irrelevant job postings
+                if not _is_relevant_role(job_position):
+                    continue
+                # Extract best email from all text sources
+                all_text = " ".join([poster_title, desc,
+                                     str(item.get("companyWebsite") or ""),
+                                     str(item.get("externalApplyLink") or "")])
+                email = _extract_email(all_text)
                 company = (item.get("companyName") or "").strip()
                 poster = item.get("jobPosterName") or ""
                 linkedin_url = item.get("jobPosterProfileUrl") or item.get("link") or ""
                 if not company:
                     continue
-                # Dedup within this scrape pass
                 key = f"{poster.lower()}|{company.lower()}"
                 if key in seen_companies:
                     continue
@@ -219,6 +277,7 @@ def scrape_linkedin_jobs(
                     linkedin_url=linkedin_url,
                     source="linkedin_jobs",
                     role_type=_detect_role_type(desc),
+                    job_title=job_position,
                 ))
             logger.info(f"[{country}] LinkedIn Jobs '{role}' @ {loc_label}: {len(items)} results")
             time.sleep(1)
@@ -242,19 +301,26 @@ def scrape_linkedin_posts(
     li_at cookie significantly increases results — add to settings.yaml.
     """
     contacts = []
+    seen_keys: set[str] = set()
     roles_str = " OR ".join(roles[:3])
-    sponsorship_tag = "sponsorship" if needs_sponsorship else "contract"
+    sponsorship_tag = "sponsorship" if needs_sponsorship else ""
 
-    # Build queries: preferred locations first, then generic country-wide
+    # Build recruiter-focused queries targeting people who are hiring
     preferred = COUNTRY_PREFERRED_LOCATIONS.get(country)
-    if preferred:
-        # First pass: preferred city/region, second pass: full country
-        queries = [
-            f"hiring {roles_str} {preferred[0][0]} {sponsorship_tag}",
-            f"hiring {roles_str} {country} {sponsorship_tag}",
-        ]
-    else:
-        queries = [f"hiring {roles_str} {country} {sponsorship_tag}"]
+    city = preferred[0][0].split(",")[0] if preferred else country
+
+    # Use city for India (Bangalore only), country for others
+    location_tag = city if country == "India" else country
+
+    queries = [
+        f"#hiring {roles_str} {location_tag}",
+        f"we are hiring {roles_str} {location_tag}",
+        f"looking to hire {roles_str} {location_tag}",
+        f"recruiter {roles_str} {location_tag} {sponsorship_tag}".strip(),
+        f"agency {roles_str} {location_tag} {sponsorship_tag}".strip(),
+    ]
+    # Remove duplicate/empty queries
+    queries = list(dict.fromkeys(q.strip() for q in queries if q.strip()))[:4]
 
     actor_input = {
         "searchQueries": queries,
@@ -267,14 +333,31 @@ def scrape_linkedin_posts(
 
     for item in items:
         text = str(item.get("text") or item.get("content") or "")
-        author = item.get("authorName") or item.get("author", {}).get("name") if isinstance(item.get("author"), dict) else item.get("author") or ""
+        author_raw = item.get("author") or {}
+        if isinstance(author_raw, dict):
+            author = author_raw.get("name") or ""
+        else:
+            author = str(author_raw or "")
+        author = author or item.get("authorName") or ""
         company = item.get("authorCompany") or item.get("company") or ""
         title = item.get("authorTitle") or item.get("title") or "Hiring Manager"
+
+        # Filter out posts from clearly irrelevant people
+        if not _is_relevant_role(str(title)) and not _is_relevant_role(text[:200]):
+            continue
+
+        # Extract best email from the post text
         email = _extract_email(text)
+
         linkedin_url = item.get("url") or item.get("postUrl") or ""
 
         if not author and not company:
             continue
+
+        key = f"{str(author).lower()}|{str(company).lower()}"
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
 
         contacts.append(Contact(
             name=str(author),
@@ -285,6 +368,7 @@ def scrape_linkedin_posts(
             linkedin_url=linkedin_url,
             source="linkedin_posts",
             role_type=_detect_role_type(text),
+            job_title=roles_str,
         ))
 
     logger.info(f"[{country}] LinkedIn Posts: {len(contacts)} results")
@@ -312,11 +396,15 @@ def scrape_indeed(
     for role in roles[:3]:
         if len(contacts) >= max_results:
             break
-        query = role + (" visa sponsorship" if needs_sponsorship else " contract")
+        query = role + (" visa sponsorship" if needs_sponsorship else "")
 
-        # Search preferred location first, then fall back to full country
-        locations_to_try = ([preferred_location, default_location] if preferred_location and preferred_location != default_location
-                            else [default_location])
+        # India: Bangalore only, no country fallback
+        if country == "India":
+            locations_to_try = [preferred_location] if preferred_location else [default_location]
+        else:
+            locations_to_try = ([preferred_location, default_location]
+                                if preferred_location and preferred_location != default_location
+                                else [default_location])
 
         for location in locations_to_try:
             if len(contacts) >= max_results:
@@ -332,20 +420,29 @@ def scrape_indeed(
             for item in items:
                 if len(contacts) >= max_results:
                     break
+                job_position = str(item.get("positionName") or role)
+                # Filter irrelevant job types
+                if not _is_relevant_role(job_position):
+                    continue
                 desc = str(item.get("description") or item.get("descriptionHTML") or "")
-                email = _extract_email(desc) or _extract_email(str(item.get("externalApplyLink") or ""))
+                # Extract best email from all available fields
+                all_text = " ".join([desc,
+                                     str(item.get("externalApplyLink") or ""),
+                                     str(item.get("applyEmail") or "")])
+                email = _extract_email(all_text)
                 company = (item.get("company") or "").strip()
                 if not company:
                     continue
                 contacts.append(Contact(
-                    name="",
+                    name=item.get("companyInfo", {}).get("name", "") if isinstance(item.get("companyInfo"), dict) else "",
                     email=email,
                     company=company,
-                    title=item.get("positionName") or "Recruiter",
+                    title=job_position,
                     country=country,
                     linkedin_url=item.get("url") or item.get("companyIndeedUrl"),
                     source="indeed",
                     role_type=_detect_role_type(desc),
+                    job_title=job_position,
                 ))
             logger.info(f"[{country}] Indeed '{role}' @ {location}: {len(items)} results")
             time.sleep(0.5)

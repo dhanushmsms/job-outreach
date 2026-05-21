@@ -36,6 +36,7 @@ COLUMNS = [
     "Name", "Email", "Company", "Title", "Country",
     "LinkedIn URL", "Source", "Role Type", "Status",
     "Date Emailed", "Reply Date", "Notes", "Message ID", "Follow Up Sent",
+    "Job Title",
 ]
 
 STATUS_FOLLOW_UP = "follow_up_sent"
@@ -58,16 +59,22 @@ class SheetsClient:
     def _get_or_create_tab(self, user_name: str) -> gspread.Worksheet:
         tab_name = user_name.split("@")[0].replace(" ", "_")
         try:
-            ws = self._spreadsheet.worksheet(tab_name)
+            ws = _sheets_retry(lambda: self._spreadsheet.worksheet(tab_name))
         except gspread.WorksheetNotFound:
             ws = self._spreadsheet.add_worksheet(title=tab_name, rows=1000, cols=len(COLUMNS))
             logger.info(f"Created new tab: {tab_name}")
 
-        # Always verify row 1 is the correct header — insert it if missing or wrong
+        # Always verify row 1 is the correct header — update in-place or insert if missing
         first_row = _sheets_retry(lambda: ws.row_values(1))
         if first_row != COLUMNS:
-            logger.info(f"Inserting header row into tab: {tab_name}")
-            ws.insert_row(COLUMNS, index=1)
+            if first_row and first_row[0] == "Name":
+                # Existing header — update in place (handles new columns being added)
+                logger.info(f"Updating header row in tab: {tab_name}")
+                _sheets_retry(lambda: ws.update("A1", [COLUMNS]))
+            else:
+                # No header at all — insert one
+                logger.info(f"Inserting header row into tab: {tab_name}")
+                ws.insert_row(COLUMNS, index=1)
             ws.format(f"A1:{chr(ord('A') + len(COLUMNS) - 1)}1",
                       {"textFormat": {"bold": True}})
         return ws
@@ -117,11 +124,16 @@ class SheetsClient:
                 c.get("source", ""),
                 c.get("role_type", ""),
                 STATUS_SCRAPED,
-                "", "", "", "",
+                "", "", "", "", "",  # Date Emailed, Reply Date, Notes, Message ID, Follow Up Sent
+                c.get("job_title", ""),
             ])
             added += 1
         if rows_to_append:
-            ws.append_rows(rows_to_append)
+            # Use explicit row position to avoid gspread append_rows column-offset bug
+            current_rows = len(_sheets_retry(ws.get_all_values))
+            _sheets_retry(lambda r=rows_to_append, cr=current_rows: ws.update(
+                values=r, range_name=f"A{cr + 1}"
+            ))
         logger.info(f"Added {added} new contacts for {user_name}")
         return added
 

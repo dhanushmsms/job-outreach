@@ -2,6 +2,7 @@
 
 import logging
 import urllib.parse
+from datetime import datetime
 
 import requests
 
@@ -53,6 +54,56 @@ def notify_telegram(message: str, bot_token: str, chat_id: str) -> bool:
     except Exception as e:
         logger.error("Telegram notification failed: %s", e)
         return False
+
+
+def notify_run_started(users: list, settings: dict, countries: list) -> None:
+    """Broadcast to all users that a scrape+email run has started."""
+    now = datetime.now().strftime("%d %b %I:%M %p")
+    user_names = ", ".join(u["name"].split()[0] for u in users)
+    country_list = ", ".join(countries[:6])
+    msg = (
+        f"🚀 *Run started — {now}*\n\n"
+        f"👥 Users: {user_names}\n"
+        f"🌍 Countries: {country_list}\n\n"
+        f"Scraping contacts + sending emails... ⏳"
+    )
+    for user in users:
+        notify_telegram(
+            message=msg,
+            bot_token=settings.get("telegram_bot_token", ""),
+            chat_id=user.get("telegram_chat_id", ""),
+        )
+    logger.info("Run-started notification sent")
+
+
+def notify_run_completed(
+    users: list,
+    settings: dict,
+    total_scraped: int = 0,
+    total_new: int = 0,
+    emails_sent: int = 0,
+    duration_mins: int = 0,
+    skipped: int = 0,
+) -> None:
+    """Broadcast to all users that the run has completed with stats."""
+    now = datetime.now().strftime("%d %b %I:%M %p")
+    lines = [f"✅ *Run complete — {now}*\n"]
+    if total_scraped or total_new:
+        lines.append(f"📋 Contacts scraped: {total_scraped} ({total_new} new)")
+    if emails_sent:
+        lines.append(f"📧 Emails sent: {emails_sent}")
+    if skipped:
+        lines.append(f"⏭ Skipped (no email): {skipped}")
+    if duration_mins:
+        lines.append(f"⏱ Duration: {duration_mins} min")
+    msg = "\n".join(lines)
+    for user in users:
+        notify_telegram(
+            message=msg,
+            bot_token=settings.get("telegram_bot_token", ""),
+            chat_id=user.get("telegram_chat_id", ""),
+        )
+    logger.info("Run-completed notification sent: %d scraped, %d new, %d emails", total_scraped, total_new, emails_sent)
 
 
 def notify_cookie_expired(user_config: dict, settings: dict) -> None:

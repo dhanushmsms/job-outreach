@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 from src.config_loader import load_settings, load_user_configs
 from src.emailer import send_cold_email, send_followup_email
 from src.monitor import check_for_replies
-from src.notifier import notify_reply_received, notify_cookie_expired
+from src.notifier import notify_reply_received, notify_cookie_expired, notify_run_started, notify_run_completed
 from src.reply_drafter import draft_reply
 from src.scraper import scrape_all, scrape_linkedin_posts, _get_apify_token
 from src.sheets import SheetsClient
@@ -91,6 +91,7 @@ def _cross_share_contacts(sheet: SheetsClient, contact_dicts: list[dict], all_us
 
 
 def run_scrape(users, settings, countries_override=None, max_contacts=50):
+    import datetime as _dt
     sheet = SheetsClient(settings["google_sheet_id"], settings["google_service_account_file"])
 
     # ── Cookie health check — runs once at the top of every scrape ────────────
@@ -98,6 +99,13 @@ def run_scrape(users, settings, countries_override=None, max_contacts=50):
         c["name"] for u in users for c in u.get("target_countries", [])
     })
     _check_cookie_health(settings, users, countries_sample=all_countries[:2])
+
+    # ── Telegram: notify run started ──────────────────────────────────────────
+    start_time = _dt.datetime.now()
+    notify_run_started(users, settings, all_countries)
+
+    total_scraped = 0
+    total_new = 0
 
     for user in users:
         countries = countries_override or [c["name"] for c in user.get("target_countries", [])]
@@ -118,18 +126,28 @@ def run_scrape(users, settings, countries_override=None, max_contacts=50):
             contact_dicts = [
                 {"name": c.name, "email": c.email or "", "company": c.company,
                  "title": c.title, "country": c.country, "linkedin_url": c.linkedin_url or "",
-                 "source": c.source, "role_type": c.role_type}
+                 "source": c.source, "role_type": c.role_type, "job_title": c.job_title}
                 for c in contacts
             ]
             added = sheet.add_contacts(contact_dicts, user["name"])
+            total_scraped += len(contacts)
+            total_new += added
             logger.info(f"[{user['name']}] {country_name}: {len(contacts)} found, {added} new")
 
             # ── Share contacts with other users who also target this country ──
             _cross_share_contacts(sheet, contact_dicts, users, user)
 
+    # ── Telegram: notify scrape completed ────────────────────────────────────
+    duration_mins = int((_dt.datetime.now() - start_time).total_seconds() / 60)
+    notify_run_completed(users, settings, total_scraped, total_new, 0, duration_mins)
+
 
 def run_email(users, settings, dry_run=False):
+    import datetime as _dt
     sheet = SheetsClient(settings["google_sheet_id"], settings["google_service_account_file"])
+    total_sent = 0
+    total_skipped = 0
+
     for user in users:
         daily_limit = user.get("daily_email_limit", 20)
         daily_sent = sheet.get_daily_email_count(user["name"])
@@ -163,6 +181,12 @@ def run_email(users, settings, dry_run=False):
             )
             if msg_id:
                 sheet.mark_emailed(contact.get("Email", ""), user["name"], msg_id)
+                total_sent += 1
+            elif contact.get("Email", ""):
+                total_skipped += 1
+
+    if not dry_run:
+        notify_run_completed(users, settings, 0, 0, total_sent, 0, skipped=total_skipped)
 
 
 def run_followups(users, settings):
